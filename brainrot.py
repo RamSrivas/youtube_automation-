@@ -8,6 +8,11 @@ import yt_dlp
 from gtts import gTTS
 import pygame
 import numpy as np
+from dotenv import load_dotenv
+
+load_dotenv()
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 # Fix for PIL/Pillow compatibility
 try:
@@ -349,7 +354,7 @@ class BrainRotVideoGenerator:
 # Usage example
 if __name__ == "__main__":
     # Initialize the generator
-    GROQ_API_KEY = ""  # Get from https://console.groq.com/
+
     
     generator = BrainRotVideoGenerator(GROQ_API_KEY)
     
