@@ -8,28 +8,22 @@ import yt_dlp
 from gtts import gTTS
 import pygame
 import numpy as np
-import os 
-from dotenv import load_dotenv
 
-load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-
+# Fix for PIL/Pillow compatibility
 try:
     from PIL import Image, ImageDraw, ImageFont
+    PIL_AVAILABLE = True
     # Handle ANTIALIAS deprecation
     if hasattr(Image, 'ANTIALIAS'):
         ANTIALIAS = Image.ANTIALIAS
     else:
         ANTIALIAS = Image.LANCZOS
 except ImportError:
-    Image = None
-    ImageDraw = None
-    ImageFont = None
-    ANTIALIAS = None
+    PIL_AVAILABLE = False
+    print("Warning: PIL/Pillow not found. Some features may not work.")
 
 class BrainRotVideoGenerator:
-    def _init_(self, groq_api_key):
+    def __init__(self, groq_api_key):
         self.groq_api_key = groq_api_key
         self.groq_url = "https://api.groq.com/openai/v1/chat/completions"
         self.background_videos_dir = "background_videos"
@@ -73,38 +67,99 @@ class BrainRotVideoGenerator:
             print(f"Error generating content: {e}")
             return "Default brain rot content here"
     
+    def create_text_image(self, text, size=(1080, 1920)):
+        """Create a text image using PIL instead of MoviePy TextClip"""
+        if not PIL_AVAILABLE:
+            # Fallback: create a simple colored background
+            return self.create_simple_text_background(text, size)
+        
+        from PIL import Image, ImageDraw, ImageFont
+        
+        # Create image
+        img = Image.new('RGBA', size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        
+        # Wrap text
+        wrapped_text = textwrap.fill(text, width=25)
+        
+        # Try to use a system font, fallback to default
+        try:
+            font = ImageFont.truetype("arial.ttf", 60)
+        except:
+            try:
+                font = ImageFont.truetype("Arial.ttf", 60)
+            except:
+                try:
+                    font = ImageFont.load_default()
+                except:
+                    font = None
+        
+        # Get text dimensions
+        if font:
+            bbox = draw.textbbox((0, 0), wrapped_text, font=font)
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+        else:
+            text_width, text_height = 500, 200
+        
+        # Calculate position (center)
+        x = (size[0] - text_width) // 2
+        y = (size[1] - text_height) // 2
+        
+        # Draw shadow
+        if font:
+            draw.text((x+3, y+3), wrapped_text, fill=(0, 0, 0, 180), font=font)
+            # Draw main text
+            draw.text((x, y), wrapped_text, fill=(255, 255, 255, 255), font=font)
+        else:
+            draw.text((x+3, y+3), wrapped_text, fill=(0, 0, 0, 180))
+            draw.text((x, y), wrapped_text, fill=(255, 255, 255, 255))
+        
+        return img
+    
+    def create_simple_text_background(self, text, size=(1080, 1920)):
+        """Create a simple background with text overlay using numpy"""
+        # Create a colorful background
+        background = np.random.randint(0, 255, (size[1], size[0], 3), dtype=np.uint8)
+        
+        # Add some pattern
+        for i in range(0, size[1], 100):
+            background[i:i+50, :] = [255, 0, 128]  # Pink stripes
+        
+        # Save as temporary image
+        from PIL import Image
+        img = Image.fromarray(background)
+        return img
+    
     def create_text_clip(self, text, duration=5):
-        """Create a text clip with brain rot styling"""
-        # Wrap text for better display
-        wrapped_text = textwrap.fill(text, width=20)
+        """Create a text clip using PIL-generated image"""
+        # Create text image
+        text_img = self.create_text_image(text)
         
-        # Create main text clip - fixed parameter issue
-        main_text = TextClip(
-            wrapped_text,
-            fontsize=50,
-            color='white',
-            font='Arial-Bold'
-        ).set_duration(duration).set_position('center')
-                
-        # Add shadow effect
-        shadow_text = TextClip(
-            wrapped_text,
-            fontsize=50,
-            color='black',
-            font='Arial-Bold'
-        ).set_duration(duration).set_position(('center', 'center')).set_opacity(0.3)
+        # Save temporary image
+        temp_path = os.path.join(self.audio_effects_dir, "temp_text.png")
+        text_img.save(temp_path)
         
-        # Add some brain rot effects - flashing text
+        # Create video clip from image
+        text_clip = ImageClip(temp_path).set_duration(duration)
+        
+        # Add blinking effect
         def blink_effect(get_frame, t):
             frame = get_frame(t)
-            if int(t * 8) % 2:  # Blink every 1/8 second
+            if int(t * 4) % 2:  # Blink every 1/4 second
                 return frame
             else:
-                return frame * 0.7  # Dim the text
+                return frame * 0.8  # Dim the text
         
-        main_text = main_text.fl(blink_effect)
+        text_clip = text_clip.fl(blink_effect)
         
-        return CompositeVideoClip([shadow_text, main_text])
+        # Clean up temp file
+        try:
+            os.remove(temp_path)
+        except:
+            pass
+        
+        return text_clip
     
     def add_brain_rot_effects(self, video_clip):
         """Add visual brain rot effects"""
@@ -131,7 +186,7 @@ class BrainRotVideoGenerator:
     def download_gameplay_footage(self):
         """Download gameplay footage from YouTube"""
         gameplay_urls = [
-            "https://www.youtube.com/watch?v=VIDEO_ID_HERE",  # Replace with actual Subway Surfers gameplay
+            "https://www.youtube.com/watch?v=AfrD_npUSdI",  # Replace with actual Subway Surfers gameplay
             # Add more URLs here
         ]
         
@@ -185,25 +240,22 @@ class BrainRotVideoGenerator:
     def create_default_background(self):
         """Create a default animated background if no gameplay footage"""
         def make_frame(t):
-            # Create a moving gradient background
-            colors = [
-                [255, 0, 128],  # Pink
-                [0, 255, 255],  # Cyan
-                [255, 255, 0],  # Yellow
-            ]
-            
+            # Create a simple moving gradient background
             # Create animated gradient
             frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
             
-            # Create a simple animated pattern
-            for y in range(1920):
-                for x in range(1080):
+            # Simple animated pattern - much more efficient
+            phase = t * 0.5  # Slow animation
+            
+            for y in range(0, 1920, 20):  # Skip pixels for performance
+                for x in range(0, 1080, 20):
                     # Create animated rainbow effect
-                    color_phase = (x + y + t * 50) % 360
-                    r = int(128 + 127 * np.sin(np.radians(color_phase)))
-                    g = int(128 + 127 * np.sin(np.radians(color_phase + 120)))
-                    b = int(128 + 127 * np.sin(np.radians(color_phase + 240)))
-                    frame[y, x] = [r, g, b]
+                    r = int(128 + 127 * np.sin(phase + x * 0.01))
+                    g = int(128 + 127 * np.sin(phase + y * 0.01))
+                    b = int(128 + 127 * np.sin(phase + (x + y) * 0.005))
+                    
+                    # Fill block
+                    frame[y:y+20, x:x+20] = [r, g, b]
             
             return frame
         
@@ -295,8 +347,9 @@ class BrainRotVideoGenerator:
         return output_path
 
 # Usage example
-if __name__ == "_main_":
-    # Initialize the generat
+if __name__ == "__main__":
+    # Initialize the generator
+    GROQ_API_KEY = ""  # Get from https://console.groq.com/
     
     generator = BrainRotVideoGenerator(GROQ_API_KEY)
     
@@ -310,7 +363,7 @@ if __name__ == "_main_":
 
 # Additional automation script for posting (basic structure)
 class SocialMediaPoster:
-    def _init_(self):
+    def __init__(self):
         pass
     
     def upload_to_youtube_shorts(self, video_path, title, description):
@@ -322,4 +375,4 @@ class SocialMediaPoster:
     def upload_to_instagram_reels(self, video_path, caption):
         """Upload to Instagram Reels"""
         # You'll need Instagram Graph API or third-party services
-        print(f"Would upload {video_path} to Instagram with caption: {caption}")
+        print(f"Would upload {video_path} to Instagram with caption: {caption}")
